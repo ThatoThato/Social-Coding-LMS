@@ -1,0 +1,17 @@
+Digital Literacy & Cyber Safety - Answers
+
+1. A message says I have won data and asks me to click a link.
+   What do I check first?
+   I check who sent it. If it is a number I do not know, or the link does not
+   match the real company name, I do not click it. I would go to the company's
+   real website myself instead of using the link.
+
+2. A friend asks for my password "just to check something".
+   I would say no. Even if I trust the friend, once someone else has my
+   password I cannot control who else gets it. If they need something from my
+   account I can open it myself while they watch.
+
+3. Which of my accounts share one password?
+   My email and my school login use the same password. I am going to change
+   the school one this week so they are different, because if one leaks the
+   other is exposed too.

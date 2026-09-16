@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planning – Social Coding LMS</title>
+    <link rel="stylesheet" href="shared-theme.css">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <meta name="theme-color" content="var(--accent-purple)">
+    <style>
+        .tool { margin-bottom: 2rem; }
+        .tool-head { display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom:0.9rem; }
+        .method { font-family:'Inter',sans-serif; font-size:0.8rem; color:var(--text-secondary);
+            border-left:3px solid var(--accent-purple); padding:0.5rem 0.9rem; margin:0.6rem 0 1rem;
+            background:var(--input-bg); border-radius:0 8px 8px 0; }
+        .bar { height:10px; border-radius:5px; background:var(--divider); overflow:hidden; min-width:70px; }
+        .bar span { display:block; height:100%; background:var(--accent-purple); }
+        .kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1rem; margin-bottom:1.25rem; }
+        .kpi { background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:1rem 1.15rem; }
+        .kpi-v { font-size:1.9rem; font-weight:700; color:var(--text-primary); }
+        .kpi-l { font-family:'Inter',sans-serif; font-size:0.78rem; color:var(--text-secondary); margin-top:0.15rem; }
+        .inline-form { display:flex; gap:0.6rem; align-items:flex-end; flex-wrap:wrap; }
+    </style>
+</head>
+<body>
+<div class="bg-glow bg-glow-1"></div><div class="bg-glow bg-glow-2"></div>
+<header>
+    <div class="header-content">
+        <a class="brand" href="/admin-dashboard.html"><div class="brand-icon"><img src="/icons/logo-mark-white.png" alt="Social Coding"></div><div><div class="brand-text">Social Coding LMS</div><div class="brand-sub">Head Office</div></div></a>
+        <div class="header-right">
+            <nav class="nav-links">
+                <a class="nav-link" href="/admin-dashboard.html">Dashboard</a>
+                <a class="nav-link" href="/admin-reports.html">Impact Report</a>
+                <a class="nav-link active" href="/admin-planning.html">Planning</a>
+            </nav>
+            <label class="theme-toggle"><span id="themeIcon" class="theme-label">Dark</span><div class="toggle-track" onclick="toggleTheme()"><div class="toggle-thumb"></div></div></label>
+            <div style="display:flex;align-items:center;gap:0.6rem;"><div class="avatar" id="userAvatar">SA</div><div><div class="user-name" id="userName"></div><div class="user-meta" id="userMeta"></div></div></div>
+            <button class="btn btn-sm" onclick="openPasswordModal()">Password</button>
+            <button class="btn-logout" onclick="logout()">Logout</button>
+        </div>
+    </div>
+</header>
+<main>
+    <div class="page-header" id="pageHeader">
+        <div class="page-title">Planning</div>
+        <div class="page-subtitle">Three calculations that turn the records into decisions: where learners are heading, whether marking can be done in time, and where limited equipment should go.</div>
+    </div>
+
+    <!-- ── 1. Forecast ── -->
+    <div class="tool">
+        <div class="tool-head">
+            <div>
+                <div class="section-title">Projected outcomes</div>
+                <div class="section-sub" id="fcSub">Loading…</div>
+            </div>
+            <div class="inline-form">
+                <select class="filter-select" id="fcFilter" onchange="renderForecast()">
+                    <option value="">All learners</option>
+                    <option value="unlikely to complete">Unlikely to complete</option>
+                    <option value="borderline">Borderline</option>
+                    <option value="on track">On track</option>
+                </select>
+                <select class="filter-select" id="fcDirection" onchange="renderForecast()">
+                    <option value="">Any direction</option>
+                    <option value="declining">Declining</option>
+                    <option value="improving">Improving</option>
+                </select>
+            </div>
+        </div>
+        <div class="method">
+            <b>Method.</b> A least-squares regression is fitted to each learner's marks in the order they were
+            awarded. The line is projected two assessments forward, then shrunk towards the learner's current
+            average in proportion to how little evidence supports it — two marks on a steep slope are not
+            extrapolated as confidently as six on a clear line. The projection is combined with attendance
+            (0.35) and submission rate (0.20) into a completion probability.
+        </div>
+        <div class="kpi-row" id="fcKpis"></div>
+        <div class="table-wrap">
+            <table class="data">
+                <thead><tr>
+                    <th>Learner</th><th>School</th><th class="num">Marks</th><th class="num">Current</th>
+                    <th class="num">Projected</th><th>Direction</th><th class="num">Attendance</th>
+                    <th class="num">Probability</th><th>Outlook</th><th>Confidence</th>
+                </tr></thead>
+                <tbody id="fcBody"><tr><td colspan="10" class="table-empty">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── 2. Marking schedule ── -->
+    <div class="tool">
+        <div class="tool-head">
+            <div>
+                <div class="section-title">Marking workload</div>
+                <div class="section-sub" id="msSub">Loading…</div>
+            </div>
+            <div class="inline-form">
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label">Submissions a facilitator can mark per day</label>
+                    <input type="number" class="filter-search" id="msPerDay" value="8" min="1" max="50" style="max-width:120px;">
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="loadSchedule()">Recalculate</button>
+            </div>
+        </div>
+        <div class="method">
+            <b>Method.</b> Outstanding submissions are ordered Earliest Deadline First, which is the optimal
+            ordering for meeting deadlines with one marker — if any order can meet them all, this one does.
+            Work is laid out day by day against the assumed capacity. The schedule then reports the minimum
+            daily capacity that would clear every remaining deadline, so a manager knows what help is needed
+            rather than only that there is a problem.
+        </div>
+        <div class="table-wrap">
+            <table class="data">
+                <thead><tr>
+                    <th>Facilitator</th><th class="num">Outstanding</th><th class="num">Already overdue</th>
+                    <th class="num">Days of work</th><th class="num">Needed per day</th><th>Status</th><th>Next deadline missed</th>
+                </tr></thead>
+                <tbody id="msBody"><tr><td colspan="7" class="table-empty">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── 3. Device allocation ── -->
+    <div class="tool">
+        <div class="tool-head">
+            <div>
+                <div class="section-title">Equipment allocation</div>
+                <div class="section-sub" id="alSub">Loading…</div>
+            </div>
+            <div class="inline-form">
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label">Devices to distribute</label>
+                    <input type="number" class="filter-search" id="alDevices" value="60" min="1" max="2000" style="max-width:120px;">
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="loadAllocation()">Calculate</button>
+            </div>
+        </div>
+        <div class="method">
+            <b>Method.</b> Each school is scored on unmet need (0.55), attendance (0.25) and retention risk
+            (0.20). Each additional device at a school is worth slightly less than the one before, so the
+            benefit function is concave — which means repeatedly giving the next device wherever it gains the
+            most produces the highest total benefit achievable. The result is compared against splitting the
+            batch evenly, which is what would otherwise happen.
+        </div>
+        <div class="kpi-row" id="alKpis"></div>
+        <div class="table-wrap">
+            <table class="data">
+                <thead><tr>
+                    <th>School</th><th>Province</th><th class="num">Learners</th><th class="num">Unmet need</th>
+                    <th class="num">Attendance</th><th class="num">At risk</th><th class="num">Priority</th>
+                    <th class="num">Allocated</th><th>Share</th>
+                </tr></thead>
+                <tbody id="alBody"><tr><td colspan="9" class="table-empty">Loading…</td></tr></tbody>
+            </table>
+        </div>
+        <div class="table-caption">Priority is a weighted score, not a queue position: a small school with poor attendance can rank above a larger one that is already well served.</div>
+    </div>
+</main>
+
+<nav class="bottom-nav">
+    <a href="/admin-dashboard.html"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span class="nav-label">Dashboard</span></a>
+    <a href="/admin-reports.html"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16.5 10 10l3.5 3.5L20 7"/><path d="M15.5 7H20v4.5"/></svg></span><span class="nav-label">Report</span></a>
+    <a href="/admin-planning.html" class="active"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V12M12 20V4.5M19 20v-6"/></svg></span><span class="nav-label">Planning</span></a>
+</nav>
+<div class="toast" id="toast"><span id="toastMsg"></span></div>
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script>
+    let forecast = null;
+
+    async function load() {
+        requireAuth('admin');
+        populateHeader();
+        await loadForecast();
+        await loadSchedule();
+        await loadAllocation();
+    }
+
+    // ── 1. Forecast ──
+    async function loadForecast() {
+        const data = await apiFetch('/api/forecast');
+        if (!data || !Array.isArray(data.learners)) return;
+        forecast = data;
+        const s = data.summary;
+        document.getElementById('fcKpis').innerHTML = `
+            <div class="kpi"><div class="kpi-v">${s.on_track}</div><div class="kpi-l">on track to complete</div></div>
+            <div class="kpi"><div class="kpi-v">${s.borderline}</div><div class="kpi-l">borderline</div></div>
+            <div class="kpi"><div class="kpi-v">${s.unlikely}</div><div class="kpi-l">unlikely to complete</div></div>
+            <div class="kpi"><div class="kpi-v">${s.improving}</div><div class="kpi-l">marks improving</div></div>
+            <div class="kpi"><div class="kpi-v">${s.declining}</div><div class="kpi-l">marks declining</div></div>
+            <div class="kpi"><div class="kpi-v">${s.projected_pass_rate == null ? '—' : s.projected_pass_rate + '%'}</div><div class="kpi-l">projected pass rate</div></div>`;
+        document.getElementById('fcSub').textContent =
+            `${s.reviewed} active learners projected from their mark history, attendance and submission record`;
+        renderForecast();
+    }
+
+    function renderForecast() {
+        if (!forecast) return;
+        const outlook = document.getElementById('fcFilter').value;
+        const dir = document.getElementById('fcDirection').value;
+        const rows = forecast.learners.filter(l =>
+            (!outlook || l.outlook === outlook) && (!dir || l.direction === dir));
+        const TAG = { 'on track':'tag-ok', borderline:'tag-warn', 'unlikely to complete':'tag-bad', unknown:'tag-idle' };
+        const DIR = { improving:'tag-ok', declining:'tag-bad', steady:'tag-idle' };
+        document.getElementById('fcBody').innerHTML = rows.length ? rows.slice(0, 60).map(l => `
+            <tr>
+                <td class="strong">${l.name} ${l.surname}<div class="mono">${l.student_number || ''}</div></td>
+                <td class="muted">${l.school_name || '—'}</td>
+                <td class="num">${l.marks_recorded}</td>
+                <td class="num">${l.current_average == null ? '—' : l.current_average + '%'}</td>
+                <td class="num strong">${l.projected_final == null ? '—' : l.projected_final + '%'}</td>
+                <td><span class="tag ${DIR[l.direction]}">${l.direction}</span>${l.trend_per_assessment ? `<div class="muted">${l.trend_per_assessment > 0 ? '+' : ''}${l.trend_per_assessment} per task</div>` : ''}</td>
+                <td class="num">${l.attendance_rate == null ? '—' : l.attendance_rate + '%'}</td>
+                <td class="num strong">${l.completion_probability == null ? '—' : l.completion_probability + '%'}</td>
+                <td><span class="tag ${TAG[l.outlook] || 'tag-idle'}">${l.outlook}</span></td>
+                <td class="muted">${l.confidence}</td>
+            </tr>`).join('')
+            : '<tr><td colspan="10" class="table-empty">No learners match this filter.</td></tr>';
+    }
+
+    // ── 2. Marking schedule ──
+    async function loadSchedule() {
+        const perDay = Number(document.getElementById('msPerDay').value) || 8;
+        const data = await apiFetch(`/api/marking-schedule?per_day=${perDay}`);
+        if (!data || !Array.isArray(data.plans)) return;
+        const s = data.summary;
+        document.getElementById('msSub').textContent =
+            `${s.total_outstanding} submissions outstanding · ${s.already_overdue} already past their deadline · ` +
+            `${s.at_risk_of_breach} facilitators would miss a deadline still ahead, at ${data.assumed_capacity_per_day} per day`;
+        const TAG = { 'on track':'tag-ok', 'will miss deadlines':'tag-warn', behind:'tag-bad' };
+        document.getElementById('msBody').innerHTML = data.plans.length ? data.plans.map(p => `
+            <tr>
+                <td class="strong">${p.facilitator}</td>
+                <td class="num">${p.outstanding}</td>
+                <td class="num">${p.overdue || '—'}</td>
+                <td class="num">${p.days_of_work}</td>
+                <td class="num strong">${p.required_per_day}</td>
+                <td><span class="tag ${TAG[p.status] || 'tag-idle'}">${p.status}</span></td>
+                <td class="muted">${p.first_breach ? `${p.first_breach.assignment} — due ${p.first_breach.due}` : '—'}</td>
+            </tr>`).join('')
+            : '<tr><td colspan="7" class="table-empty">Nothing outstanding — all marking is up to date.</td></tr>';
+    }
+
+    // ── 3. Allocation ──
+    async function loadAllocation() {
+        const devices = Number(document.getElementById('alDevices').value) || 60;
+        const data = await apiFetch(`/api/allocation?devices=${devices}`);
+        if (!data || !Array.isArray(data.schools)) return;
+        document.getElementById('alKpis').innerHTML = `
+            <div class="kpi"><div class="kpi-v">${data.devices_allocated}</div><div class="kpi-l">devices allocated</div></div>
+            <div class="kpi"><div class="kpi-v">${data.total_unmet_need}</div><div class="kpi-l">learners still without one</div></div>
+            <div class="kpi"><div class="kpi-v">${data.benefit_score}</div><div class="kpi-l">benefit of this plan</div></div>
+            <div class="kpi"><div class="kpi-v">${data.even_split_score}</div><div class="kpi-l">benefit of an even split</div></div>
+            <div class="kpi"><div class="kpi-v">${data.improvement_percent == null ? '—' : '+' + data.improvement_percent + '%'}</div><div class="kpi-l">gain from optimising</div></div>`;
+        document.getElementById('alSub').textContent =
+            `${data.devices_available} devices distributed across ${data.schools.length} schools by need, engagement and retention risk`;
+        const maxAlloc = Math.max(1, ...data.schools.map(s => s.allocated));
+        document.getElementById('alBody').innerHTML = data.schools.map(s => `
+            <tr>
+                <td class="strong">${s.name}</td>
+                <td class="muted">${s.location}</td>
+                <td class="num">${s.learners}</td>
+                <td class="num">${s.unmet}</td>
+                <td class="num">${s.attendance}%</td>
+                <td class="num">${s.flagged || '—'}</td>
+                <td class="num">${s.priority}</td>
+                <td class="num strong">${s.allocated}</td>
+                <td><div class="bar"><span style="width:${Math.round(s.allocated / maxAlloc * 100)}%"></span></div></td>
+            </tr>`).join('');
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        initTheme();
+        await load();
+        const ph = document.getElementById('pageHeader');
+        if (ph) ph.insertAdjacentHTML('beforeend', liveIndicator());
+        markRefreshed();
+        startLiveRefresh(load, 30);
+    });
+</script>
+</body>
+</html>

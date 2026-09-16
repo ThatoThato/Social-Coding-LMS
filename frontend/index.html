@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Coding LMS</title>
+    <meta name="theme-color" content="#0d0d0d">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <!-- Entry point. The application starts at the login page; this file exists
+         because the Android build requires an index.html in the web directory,
+         and because visiting the site root should land somewhere sensible. -->
+    <noscript><meta http-equiv="refresh" content="0; url=login.html"></noscript>
+    <style>
+        html, body { height: 100%; margin: 0; background: #0d0d0d; }
+        .splash { height: 100%; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 1.1rem; }
+        .splash img { width: min(260px, 62vw); height: auto; }
+        .splash p { font-family: 'Segoe UI', Arial, sans-serif; font-size: 0.85rem;
+            letter-spacing: 0.08em; text-transform: uppercase; color: rgba(242,242,242,0.55); margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="splash">
+        <img src="icons/logo-full-white.png" alt="Social Coding">
+        <p>Loading…</p>
+    </div>
+    <script>
+        // Send an already-signed-in user straight to their own dashboard;
+        // everyone else goes to the login page.
+        (function () {
+            var dest = 'login.html';
+            try {
+                var token = localStorage.getItem('sc_token');
+                var raw = localStorage.getItem('sc_user');
+                if (token && raw) {
+                    var role = (JSON.parse(raw) || {}).role;
+                    if (role === 'student') dest = 'student-dashboard.html';
+                    else if (role === 'facilitator') dest = 'facilitator-dashboard.html';
+                    else if (role === 'admin') dest = 'admin-dashboard.html';
+                }
+            } catch (e) { /* fall back to the login page */ }
+            window.location.replace(dest);
+        })();
+    </script>
+</body>
+</html>
