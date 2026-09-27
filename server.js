@@ -61,6 +61,48 @@ app.use(express.static(path.join(__dirname, 'frontend'), {
     }
 }));
 app.use('/uploads', express.static(UPLOADS_DIR));
+
+// ── Durable file storage ─────────────────────────────────────────────────────
+// Render's free disk is wiped whenever the service restarts, sleeps or
+// redeploys, but the database (Turso) is permanent. So every uploaded file is
+// also saved in the database, and written back to disk the first time it is
+// needed after a restart. Demo files are restored from seed-content/.
+const SEED_DIR = path.join(__dirname, 'seed-content');
+const MAX_DB_FILE = 8 * 1024 * 1024;   // 8 MB per file kept in the database
+
+async function persistUpload(req, res, next) {
+    try {
+        if (req.file) {
+            await getDb();
+            const data = fs.readFileSync(req.file.path);
+            if (data.length <= MAX_DB_FILE)
+                await run(`INSERT OR REPLACE INTO stored_files (file_name, data) VALUES (?, ?)`,
+                    [req.file.filename, data]);
+            else console.warn('Upload over 8 MB kept on disk only:', req.file.filename);
+        }
+    } catch (e) { console.error('Could not keep a database copy of the upload:', e.message); }
+    next();
+}
+
+// Returns the path of the file on disk, restoring it first if needed; null if gone
+async function ensureFile(name) {
+    if (!name) return null;
+    const safe = path.basename(name);                    // never leave uploads/
+    const full = path.join(UPLOADS_DIR, safe);
+    if (fs.existsSync(full)) return full;
+    const seeded = path.join(SEED_DIR, safe);
+    if (fs.existsSync(seeded)) { fs.copyFileSync(seeded, full); return full; }
+    const row = await get(`SELECT data FROM stored_files WHERE file_name=?`, [safe]);
+    if (row && row.data) { fs.writeFileSync(full, Buffer.from(row.data)); return full; }
+    return null;
+}
+
+async function sendFile(res, name) {
+    const full = await ensureFile(name);
+    if (!full) return res.status(404).json({
+        error: 'This file is no longer on the server. Please ask for it to be uploaded again.' });
+    return res.download(full);
+}
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'frontend', 'login.html')));
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -198,7 +240,7 @@ app.post('/api/modules/:id/lessons', auth, role('admin'), async (req, res) => {
 // Upload slides/documents to a lesson — THE "where is the uploading of slides" endpoint
 // Every school runs the same curriculum, so the material itself is uploaded
 // once by head office rather than separately at each school.
-app.post('/api/lessons/:id/materials', auth, role('admin'), upload.single('file'), async (req, res) => {
+app.post('/api/lessons/:id/materials', auth, role('admin'), upload.single('file'), persistUpload, async (req, res) => {
     try {
         await getDb();
         const { title, kind, url } = req.body;
@@ -216,7 +258,7 @@ app.get('/api/materials/:id/download', auth, async (req, res) => {
         await getDb();
         const m = await get(`SELECT * FROM materials WHERE id=?`, [req.params.id]);
         if (!m) return res.status(404).json({ error: 'Not found' });
-        if (m.file_name) return res.download(path.join(UPLOADS_DIR, m.file_name));
+        if (m.file_name) return await sendFile(res, m.file_name);
         if (m.url) return res.redirect(m.url);
         res.status(404).json({ error: 'No file or link' });
     } catch (e) { res.status(500).json({ error: 'Server error' }); }
@@ -281,7 +323,7 @@ app.get('/api/assignments', auth, async (req, res) => {
 });
 
 // Create assignment with full lifecycle dates + brief upload
-app.post('/api/assignments', auth, role('facilitator'), upload.single('brief'), async (req, res) => {
+app.post('/api/assignments', auth, role('facilitator'), upload.single('brief'), persistUpload, async (req, res) => {
     try {
         await getDb();
         const { module_id, title, description, total_marks, open_date, due_date, late_days,
@@ -325,12 +367,12 @@ app.get('/api/assignments/:id/brief', auth, async (req, res) => {
         await getDb();
         const a = await get(`SELECT brief_file FROM assignments WHERE id=?`, [req.params.id]);
         if (!a?.brief_file) return res.status(404).json({ error: 'No brief uploaded' });
-        res.download(path.join(UPLOADS_DIR, a.brief_file));
+        await sendFile(res, a.brief_file);
     } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
 // Student submit — enforces the window, flags late
-app.post('/api/assignments/:id/submit', auth, role('student'), upload.single('file'), async (req, res) => {
+app.post('/api/assignments/:id/submit', auth, role('student'), upload.single('file'), persistUpload, async (req, res) => {
     try {
         await getDb();
         const today = todaySAST();
@@ -403,8 +445,8 @@ app.get('/api/submissions/:id/content', auth, role('facilitator','admin'), async
         const out = { ...sub, readable: false, text: null, language: null, lines: 0 };
         if (sub.file_name) {
             const ext = path.extname(sub.file_name).toLowerCase();
-            const full = path.join(UPLOADS_DIR, sub.file_name);
-            if (READABLE.includes(ext) && fs.existsSync(full)) {
+            const full = READABLE.includes(ext) ? await ensureFile(sub.file_name) : null;
+            if (READABLE.includes(ext) && full) {
                 const stat = fs.statSync(full);
                 if (stat.size <= 200 * 1024) {                 // refuse to inline anything huge
                     out.text = fs.readFileSync(full, 'utf8');
@@ -452,7 +494,7 @@ app.get('/api/submissions/:id/file', auth, role('facilitator','admin'), async (r
         await getDb();
         const s = await get(`SELECT file_name FROM submissions WHERE id=?`, [req.params.id]);
         if (!s?.file_name) return res.status(404).json({ error: 'No file attached' });
-        res.download(path.join(UPLOADS_DIR, s.file_name));
+        await sendFile(res, s.file_name);
     } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -706,7 +748,7 @@ app.get('/api/readings/:id/download', auth, async (req, res) => {
         await getDb();
         const r = await get(`SELECT * FROM readings WHERE id=?`, [req.params.id]);
         if (!r) return res.status(404).json({ error: 'Not found' });
-        if (r.file_name) return res.download(path.join(UPLOADS_DIR, r.file_name));
+        if (r.file_name) return await sendFile(res, r.file_name);
         if (r.url) return res.redirect(r.url);
         res.status(404).json({ error: 'No file' });
     } catch (e) { res.status(500).json({ error: 'Server error' }); }
@@ -872,7 +914,7 @@ app.delete('/api/admin/users/:id', auth, role('admin'), async (req, res) => {
 });
 
 // Add / remove readings (admin library management)
-app.post('/api/readings', auth, role('admin'), upload.single('file'), async (req, res) => {
+app.post('/api/readings', auth, role('admin'), upload.single('file'), persistUpload, async (req, res) => {
     try {
         await getDb();
         const { title, category, description, url } = req.body;

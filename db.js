@@ -32,6 +32,12 @@ async function getDb() {
         console.log('📂 Using local SQLite database');
     }
     await createTables();
+    // Permanent copies of uploaded files (see persistUpload in server.js)
+    await run(`CREATE TABLE IF NOT EXISTS stored_files (
+        file_name  TEXT PRIMARY KEY,
+        data       BLOB NOT NULL,
+        stored_at  TEXT DEFAULT (datetime('now'))
+    )`);
     const existing = await get(`SELECT COUNT(*) as cnt FROM users`);
     if (!existing || Number(existing.cnt) === 0) {
         await seed(process.env.SEED_PROFILE === 'lean' ? 'lean' : 'demo');   // full dataset by default
