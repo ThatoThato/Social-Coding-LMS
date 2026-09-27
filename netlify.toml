@@ -4,12 +4,6 @@
 [build]
   publish = "frontend"
 
-# The service worker must never be cached, or phones keep an old app shell.
-[[headers]]
-  for = "/sw.js"
-  [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
-
 [[headers]]
   for = "/manifest.json"
   [headers.values]

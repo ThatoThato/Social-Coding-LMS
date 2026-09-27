@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign in – Social Coding LMS</title>
-    <link rel="stylesheet" href="shared-theme.css">
+    <link rel="stylesheet" href="shared-theme.css?v=2025-09-b">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <meta name="theme-color" content="var(--accent-purple)">
     <meta name="mobile-web-app-capable" content="yes">
@@ -32,7 +32,14 @@
         .footer-note { text-align:center; margin-top:1.5rem; font-family:'Inter',sans-serif; font-size:0.78rem; color:var(--text-muted); }
         .theme-corner { position:fixed; top:1.25rem; right:1.5rem; z-index:20; }
         .id-hint { font-family:'Inter',sans-serif; font-size:0.74rem; color:var(--text-muted); margin-top:0.35rem; }
-    </style>
+            .server-row { display:flex; align-items:center; justify-content:center; gap:0.5rem;
+            margin-top:1rem; flex-wrap:wrap; }
+        .server-current { font-family:'Inter',sans-serif; font-size:0.7rem; color:var(--text-muted); }
+        .server-link { background:none; border:none; padding:0; cursor:pointer;
+            font-family:'Inter',sans-serif; font-size:0.7rem; color:var(--text-secondary);
+            text-decoration:underline; }
+        .server-link:hover { color:var(--text-primary); }
+</style>
 </head>
 <body>
 <div class="bg-glow bg-glow-1"></div>
@@ -49,7 +56,7 @@
     <div class="brand-center">
         <img class="brand-lockup logo-white" src="/icons/logo-full-white.png" alt="Social Coding">
         <img class="brand-lockup logo-dark"  src="/icons/logo-full-dark.png"  alt="Social Coding">
-        <div class="brand-tag">Learner Management System</div>
+        <div class="brand-tag">Learner Management System · works offline</div>
     </div>
 
     <div class="login-card">
@@ -75,12 +82,16 @@
         </div>
 
         <button class="btn-login" id="loginBtn" onclick="handleLogin()">Sign in</button>
-        <p class="footer-note">Forgot your password? Ask your facilitator or school coordinator. <span id="demoDot" onclick="switchDataset()" title="" style="opacity:0.25;cursor:pointer;font-size:9px;user-select:none;">◦</span></p>
+        <p class="footer-note">Forgot your password? Ask your facilitator or school coordinator. <span id="demoDot" onclick="switchDataset()" title="" style="opacity:0.25;cursor:pointer;font-size:9px;user-select:none;">◦</span>
+        <div class="server-row">
+            <span class="server-current" id="serverCurrent"></span>
+            <button type="button" class="server-link" onclick="setServerAddress()">Change server</button>
+        </div></p>
     </div>
 </div>
 
-<script src="config.js"></script>
-<script src="auth.js"></script>
+<script src="config.js?v=2025-09-b"></script>
+<script src="auth.js?v=2025-09-b"></script>
 <script>
    let selectedRole = 'student';
     const idCopy = {
@@ -114,7 +125,9 @@
 
         btn.disabled = true; btn.textContent = 'Signing in…';
         try {
-            const res = await fetch('/api/auth/login', {
+            // Must go through apiUrl: inside the Android app the pages are local,
+            // so a bare '/api/...' would look for the server on the phone itself.
+            const res = await fetch(apiUrl('/api/auth/login'), {
                 method: 'POST', headers: { 'Content-Type':'application/json' },
                 body: JSON.stringify({ login_id, password })
             });
@@ -128,7 +141,7 @@
             const map = { student:'/student-dashboard.html', facilitator:'/facilitator-dashboard.html', admin:'/admin-dashboard.html' };
             window.location.href = map[data.user.role];
         } catch {
-            errBox.textContent = 'Cannot reach the server. If you are offline, previously signed-in facilitators can still open Attendance from their home screen.';
+            errBox.textContent = 'Cannot reach the server. Check your connection and try again — if this is the installed app, it may be pointed at the wrong address.';
             errBox.classList.add('show');
         } finally { btn.disabled = false; btn.textContent = 'Sign in'; }
     }
@@ -139,7 +152,7 @@
         if (!confirm('Switch the dataset? This replaces ALL current data.')) return;
         const demo = confirm('OK = reload the FULL dataset (10 schools, 180 learners, 10 facilitators)\nCancel = load a SMALL starter set (1 school, 2 learners) for quick testing');
         try {
-            const res = await fetch('/api/dev/reseed', {
+            const res = await fetch(apiUrl('/api/dev/reseed'), {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ profile: demo ? 'demo' : 'lean' })
             });

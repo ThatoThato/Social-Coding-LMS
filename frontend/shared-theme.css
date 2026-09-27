@@ -714,3 +714,30 @@ table.data thead th { z-index: 5; }
     display: inline-block; opacity: 0.55; }
 .live-dot.updating i { animation: livepulse 0.9s ease-in-out infinite; opacity: 1; }
 @keyframes livepulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.75); } }
+
+
+/* ══ Small phones (Galaxy A-series and similar) ═════════════════════════════
+   The header holds a brand, a theme switch, an avatar and two buttons. On a
+   narrow screen that overflows and the last control — Logout — falls off the
+   edge. Nothing is removed: the pieces that carry least meaning are dropped
+   first, and the buttons stay reachable. */
+@media (max-width: 768px) {
+    .header-content { min-width: 0; }
+    .brand { min-width: 0; flex-shrink: 1; }
+    .brand-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .theme-label { display: none; }                 /* the switch still shows */
+    header .btn, header .btn-logout { flex-shrink: 0; white-space: nowrap;
+        padding: 0.42rem 0.7rem; font-size: 0.74rem; }
+    .header-right { gap: 0.55rem; flex-shrink: 0; }
+}
+@media (max-width: 560px) {
+    header { padding: 0.75rem 0.9rem; }
+    .brand-text { display: none; }                  /* the logo still identifies it */
+    .avatar { display: none; }
+    .header-right { gap: 0.45rem; }
+    header .btn, header .btn-logout { padding: 0.4rem 0.62rem; font-size: 0.72rem; }
+}
+@media (max-width: 360px) {
+    header .btn, header .btn-logout { padding: 0.38rem 0.55rem; font-size: 0.68rem; }
+    .brand-icon { width: 32px; height: 32px; }
+}

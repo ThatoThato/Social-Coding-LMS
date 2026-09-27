@@ -1,7 +1,18 @@
 // auth.js — Shared authentication helpers (Group 29) — v2
 // Same-origin by default (web + TWA). A native shell can set window.SC_API_BASE
 // to the deployed server URL before this script loads.
-const API = (typeof window !== 'undefined' && window.SC_API_BASE) || '';
+// Where the server lives. A value saved on the device wins over the one built
+// into the app, so a single APK can be pointed at the deployed server or at a
+// laptop on the same network without rebuilding — which is what makes a local
+// fallback possible if the internet fails during a demonstration.
+function apiBase() {
+    try {
+        const override = localStorage.getItem('sc_api_base');
+        if (override) return override.replace(/\/+$/, '');
+    } catch (e) { /* storage unavailable — fall through */ }
+    return (typeof window !== 'undefined' && window.SC_API_BASE) || '';
+}
+const API = apiBase();
 
 // Build an absolute API link (needed when the frontend is hosted separately,
 // e.g. static frontend on Netlify + Express server on Render).
@@ -190,4 +201,31 @@ function markRefreshed() {
 // Drop the indicator into a page header without each page needing markup
 function liveIndicator() {
     return '<span class="live-dot" id="liveDot"><i></i>live · <span id="liveTime">—</span></span>';
+}
+
+
+// ── Change the server this app talks to ─────────────────────────────────────
+// Used for the offline fallback: if the deployed server is unreachable, point
+// the installed app at a laptop running the same system on the local network.
+function setServerAddress() {
+    const current = (function () {
+        try { return localStorage.getItem('sc_api_base') || ''; } catch (e) { return ''; }
+    })();
+    const entered = prompt(
+        'Server address for this device.\n\n' +
+        'Leave empty to use the built-in address' +
+        (window.SC_API_BASE ? ' (' + window.SC_API_BASE + ')' : '') + '.\n' +
+        'For a laptop on the same network, use the address it prints next to "Mobile:".',
+        current);
+    if (entered === null) return;
+    const value = entered.trim().replace(/\/+$/, '');
+    try {
+        if (value) localStorage.setItem('sc_api_base', value);
+        else localStorage.removeItem('sc_api_base');
+    } catch (e) {
+        alert('This device would not let the app save the address.');
+        return;
+    }
+    alert(value ? 'Now using ' + value : 'Back to the built-in address.');
+    window.location.reload();
 }

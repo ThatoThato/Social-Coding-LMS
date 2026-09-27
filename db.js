@@ -1,8 +1,10 @@
 // db.js — Social Coding LMS Database (Group 29) — v2.1
 // Seed profiles:
-//   'lean' (default) — 2 learners, 1 facilitator, 1 admin. Starter dataset.
-//   'demo'           — 10 learners, 5 facilitators, 1 admin. Loaded via the
-//                      tiny dot on the login page → POST /api/dev/reseed.
+//   'demo' — full dataset: 162 learners, 10 facilitators, 1 admin, 10 schools.
+//            Loaded automatically on first boot.
+//   'lean' — starter dataset: 2 learners, 1 facilitator, 1 admin. Used when
+//            SEED_PROFILE=lean, or chosen via the tiny dot on the login page
+//            (POST /api/dev/reseed, disabled on the cloud deployment).
 // Real curriculum content ships in ./seed-content and is copied into ./uploads
 // at seed time, so slides, worksheets and assignment briefs are real PDFs.
 
@@ -31,9 +33,12 @@ async function getDb() {
     }
     await createTables();
     const existing = await get(`SELECT COUNT(*) as cnt FROM users`);
-    if (!existing || Number(existing.cnt) === 0)
+    if (!existing || Number(existing.cnt) === 0) {
         await seed(process.env.SEED_PROFILE === 'lean' ? 'lean' : 'demo');   // full dataset by default
-    else console.log('✅ Database already seeded');
+    } else {
+        console.log('✅ Database already seeded');
+        await backfill();   // an existing database may predate a later feature
+    }
     return client;
 }
 
@@ -237,6 +242,96 @@ async function wipeData() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  BACKFILL — repair a database that was seeded before a feature existed
+//
+//  Seeding only runs against an empty database, so that a deployment can never
+//  wipe real records. The side effect is that tables added in a later version
+//  stay empty on an existing database, and any query joining against them
+//  quietly returns nothing. That is how a deployed site can show every module
+//  to an administrator and none at all to a facilitator.
+//
+//  This runs on every start, fills only what is missing, and is silent when
+//  there is nothing to do.
+// ═════════════════════════════════════════════════════════════════════════════
+async function backfill() {
+    const count = async (table) => Number((await get(`SELECT COUNT(*) c FROM ${table}`))?.c || 0);
+    const repairs = [];
+
+    const modules = await all(`SELECT id, code FROM modules`);
+    const schools = await all(`SELECT id FROM schools`);
+
+    // 1. Which modules run at which school. Without a row here a school sees
+    //    no curriculum at all, so an empty table is filled permissively:
+    //    every module runs everywhere until head office says otherwise.
+    if (modules.length && schools.length && (await count('module_schools')) === 0) {
+        const rows = [];
+        for (const s of schools) for (const m of modules) rows.push([m.id, s.id, 1]);
+        await bulk('module_schools', ['module_id', 'school_id', 'active'], rows);
+        repairs.push(`allocated ${modules.length} modules to ${schools.length} schools`);
+    }
+
+    // 2. What each facilitator is signed off to teach. Existing staff are
+    //    marked provisional rather than verified — the system should not
+    //    invent a verification nobody performed.
+    if (modules.length && (await count('facilitator_modules')) === 0) {
+        const facs = await all(`SELECT id, school_id FROM users WHERE role='facilitator'`);
+        const rows = [];
+        for (const f of facs) {
+            const running = await all(`
+                SELECT module_id FROM module_schools WHERE school_id = ? AND active = 1`, [f.school_id]);
+            for (const r of running) rows.push([f.id, r.module_id, 'provisional']);
+        }
+        if (rows.length) {
+            await bulk('facilitator_modules', ['user_id', 'module_id', 'status'], rows);
+            repairs.push(`${rows.length} facilitator sign-offs created as provisional`);
+        }
+    }
+
+    // 3. Marking criteria. An assignment with no rubric cannot be marked at
+    //    all, because the grading screen has nothing to score against.
+    const DEFAULTS = {
+        code:     [['Correctness', 'The program runs and produces the expected output', 40],
+                   ['Completeness', 'Every task in the brief is attempted', 25],
+                   ['Code quality', 'Sensible names, tidy structure, no repetition', 20],
+                   ['Comments', 'The code explains what it is doing', 15]],
+        document: [['Content', 'Covers everything the brief asked for', 45],
+                   ['Understanding', 'Explains the concepts in their own words', 30],
+                   ['Presentation', 'Clear structure, readable, referenced', 25]],
+        link:     [['Functionality', 'The site or page works as described', 40],
+                   ['Requirements', 'All required elements are present', 35],
+                   ['Presentation', 'Layout and styling are considered', 25]],
+        text:     [['Accuracy', 'Answers are correct', 50],
+                   ['Reasoning', 'Working and explanation are shown', 30],
+                   ['Clarity', 'Written clearly', 20]],
+    };
+    const noRubric = await all(`
+        SELECT a.id, COALESCE(a.submission_type, 'code') AS submission_type
+        FROM assignments a
+        WHERE NOT EXISTS (SELECT 1 FROM rubric_criteria rc WHERE rc.assignment_id = a.id)`);
+    if (noRubric.length) {
+        const rows = [];
+        for (const a of noRubric) {
+            const set = DEFAULTS[a.submission_type] || DEFAULTS.code;
+            set.forEach(([label, descriptor, pts], i) =>
+                rows.push([a.id, label, descriptor, pts, i + 1]));
+        }
+        await bulk('rubric_criteria',
+            ['assignment_id', 'label', 'descriptor', 'max_points', 'criterion_order'], rows);
+        repairs.push(`${noRubric.length} assignments given marking criteria`);
+    }
+
+    // 4. Assignments created before hand-in types existed
+    const untyped = await run(`UPDATE assignments SET submission_type='code' WHERE submission_type IS NULL`);
+    if (untyped?.rowsAffected) repairs.push(`${untyped.rowsAffected} assignments defaulted to a code hand-in`);
+
+    if (repairs.length) {
+        console.log('🔧 Backfilled existing data:');
+        repairs.forEach(r => console.log('   ·', r));
+    }
+}
+
 async function seed(profile = 'lean') {
     console.log(`🌱 Seeding '${profile}' dataset...`);
     const hash = pw => bcrypt.hashSync(pw, 10);

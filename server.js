@@ -1,4 +1,4 @@
-// server.js — Social Coding LMS Backend (Group 29) — v2 "Offline-first LMS"
+// server.js — Social Coding LMS Backend (Group 29) — v2
 // Run: node server.js   →   http://localhost:3000
 
 require('dotenv').config();
@@ -13,7 +13,13 @@ const { getDb, run, all, get, reseed } = require('./db');
 
 const app    = express();
 const PORT   = process.env.PORT || 3000;
-const SECRET = process.env.JWT_SECRET || 'socialcoding_group29_secret';
+// A deployed server must have its own secret. The fallback exists only so the
+// local demo runs without setup; in cloud mode the server refuses to start without one.
+if ((process.env.DB_MODE || 'local') === 'turso' && !process.env.JWT_SECRET) {
+    console.error('JWT_SECRET must be set when DB_MODE=turso. Refusing to start.');
+    process.exit(1);
+}
+const SECRET = process.env.JWT_SECRET || 'socialcoding_group29_local_only';
 const MARKING_SLA_DAYS = 7;
 
 // South Africa is UTC+2: using UTC dates would flip deadlines two hours late
@@ -47,7 +53,11 @@ app.use(express.static(path.join(__dirname, 'frontend'), {
     etag: true,
     setHeaders: (res, filePath) => {
         if (/\.(html|css|js|json)$/i.test(filePath))
-            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        if (/\.html$/i.test(filePath)) {
+            res.setHeader('Pragma', 'no-cache');     // for older caches and proxies
+            res.setHeader('Expires', '0');
+        }
     }
 }));
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -64,7 +74,7 @@ function auth(req, res, next) {
 const role = (...roles) => (req, res, next) =>
     roles.includes(req.user.role) ? next() : res.status(403).json({ error: 'Access denied' });
 
-// Simple in-memory rate limit on login. Five failures from one address puts
+// Simple in-memory rate limit on login. LOGIN_MAX failures from one address puts
 // that address on a short cooldown, which stops password guessing without
 // needing another dependency.
 const loginAttempts = new Map();
@@ -107,7 +117,8 @@ app.post('/api/auth/login', async (req, res) => {
         }
         const payload = { id:Number(user.id), name:user.name, surname:user.surname, role:user.role,
                           school_id:Number(user.school_id)||null };
-        // 30-day tokens: facilitators work offline in the field for extended periods
+        // 30-day tokens: facilitators sign in on shared school devices infrequently,
+        // so a long session avoids repeated logins during a programme cycle
         const token = jwt.sign(payload, SECRET, { expiresIn: '30d' });
         res.json({ token, user: { ...payload, schoolName,
             student_number: user.student_number, employee_id: user.employee_id } });
@@ -769,11 +780,11 @@ app.post('/api/admin/users', auth, role('admin'), async (req, res) => {
             [login_id, login_id.toUpperCase()]);
         if (isStudent)
             await run(`INSERT INTO student_profiles (user_id,grade,date_of_birth,gender,guardian_name,guardian_phone,enrolment_date,cohort,status)
-                       VALUES (?,?,?,?,?,?,date('now'),strftime('%Y','now'),'studying')`,
+                       VALUES (?,?,?,?,?,?,date('now','+2 hours'),strftime('%Y','now','+2 hours'),'studying')`,
                 [created.id, grade||null, date_of_birth||null, gender||null, guardian_name||null, guardian_phone||null]);
         else if (userRole === 'facilitator')
             await run(`INSERT INTO facilitator_profiles (user_id,phone,qualification,specialisation,start_date)
-                       VALUES (?,?,?,?,date('now'))`,
+                       VALUES (?,?,?,?,date('now','+2 hours'))`,
                 [created.id, phone||null, qualification||null, specialisation||null]);
         if (userRole === 'facilitator' && school_id) {
             const u = await get(`SELECT id FROM users WHERE employee_id=?`, [login_id.toUpperCase()]);
@@ -928,7 +939,11 @@ app.get('/api/at-risk', auth, role('facilitator','admin'), async (req, res) => {
         const missedRows = await all(`
             SELECT u.id, COUNT(a.id) missed
             FROM users u
-            JOIN assignments a ON a.school_id = u.school_id AND a.published = 1 AND a.close_date < ?
+            LEFT JOIN student_profiles sp ON sp.user_id = u.id
+            JOIN assignments a ON a.school_id = u.school_id AND a.published = 1
+                 AND a.close_date < ?
+                 -- only work set after the learner joined can count as missed
+                 AND (sp.enrolment_date IS NULL OR a.open_date >= sp.enrolment_date)
             LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = u.id
             WHERE u.role='student' AND s.id IS NULL ${scope}
             GROUP BY u.id`, [today, ...p]);
@@ -1125,7 +1140,7 @@ app.post('/api/admin/facilitators/:id/modules', auth, role('admin'), async (req,
         const u = await get(`SELECT role FROM users WHERE id=?`, [req.params.id]);
         if (!u || u.role !== 'facilitator') return res.status(400).json({ error: 'Not a facilitator' });
         await run(`INSERT OR IGNORE INTO facilitator_modules (user_id, module_id, certified_on, certified_by)
-                   VALUES (?,?,date('now'),?)`, [req.params.id, module_id, req.user.id]);
+                   VALUES (?,?,date('now','+2 hours'),?)`, [req.params.id, module_id, req.user.id]);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: 'Server error' }); }
 });
@@ -1152,7 +1167,7 @@ app.post('/api/admin/facilitators/:id/verify', auth, role('admin'), async (req, 
         if (!row) return res.status(404).json({ error: 'That facilitator is not assigned to this module' });
         const due = new Date(Date.now() + months * 30 * 86400000).toISOString().slice(0, 10);
         await run(`UPDATE facilitator_modules
-                   SET status='verified', verified_on=date('now'), verified_by=?, review_due=?, evidence=?
+                   SET status='verified', verified_on=date('now','+2 hours'), verified_by=?, review_due=?, evidence=?
                    WHERE id=?`, [req.user.id, due, evidence || null, row.id]);
         res.json({ success: true, message: `Verified. Review due ${due}.` });
     } catch (e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
@@ -1253,7 +1268,7 @@ app.get('/api/admin/facilitator-performance', auth, role('admin'), async (req, r
                 SELECT COUNT(*) c FROM submissions su
                 JOIN assignments a ON a.id = su.assignment_id
                 LEFT JOIN marks m ON m.submission_id = su.id
-                WHERE a.facilitator_id = ? AND m.id IS NULL AND a.close_date < date('now')`, [f.id]);
+                WHERE a.facilitator_id = ? AND m.id IS NULL AND a.close_date < date('now','+2 hours')`, [f.id]);
             f.awaiting_marking = Number(outstanding?.c || 0);
 
             const learners = await get(`
@@ -1271,7 +1286,7 @@ app.get('/api/admin/facilitator-performance', auth, role('admin'), async (req, r
             f.modules = await all(`
                 SELECT mo.id, mo.code, mo.title, fm.certified_on, fm.status,
                        fm.verified_on, fm.review_due, fm.evidence,
-                       CASE WHEN fm.review_due IS NOT NULL AND fm.review_due < date('now')
+                       CASE WHEN fm.review_due IS NOT NULL AND fm.review_due < date('now','+2 hours')
                             THEN 1 ELSE 0 END AS review_overdue
                 FROM facilitator_modules fm JOIN modules mo ON mo.id = fm.module_id
                 WHERE fm.user_id = ? ORDER BY mo.code`, [f.id]);
@@ -1374,7 +1389,10 @@ app.get('/api/forecast', auth, role('facilitator','admin'), async (req, res) => 
                    COUNT(DISTINCT a.id) AS expected,
                    COUNT(DISTINCT s.id) AS handed_in
             FROM users u
-            JOIN assignments a ON a.school_id = u.school_id AND a.published = 1 AND a.close_date < date('now')
+            LEFT JOIN student_profiles sp ON sp.user_id = u.id
+            JOIN assignments a ON a.school_id = u.school_id AND a.published = 1
+                 AND a.close_date < date('now','+2 hours')
+                 AND (sp.enrolment_date IS NULL OR a.open_date >= sp.enrolment_date)
             LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = u.id
             WHERE u.role='student' ${scope} GROUP BY u.id`, p);
 
@@ -1762,7 +1780,7 @@ app.post('/api/dev/reseed', async (req, res) => {
         await reseed(profile);
         res.json({ success: true, profile,
             message: profile === 'demo'
-                ? 'Full demo dataset loaded: 10 learners (SC-2025-0001…0010), 5 facilitators (FAC-001…005), 1 admin (ADM-001). Passwords unchanged.'
+                ? 'Full demo dataset loaded: 162 learners (SC-2025-0001 upward), 10 facilitators (FAC-001…010), 1 admin (ADM-001). Passwords unchanged.'
                 : 'Starter dataset restored: 2 learners (SC-2025-0001, SC-2025-0002), 1 facilitator (FAC-001), 1 admin (ADM-001).' });
     } catch (e) { console.error(e); res.status(500).json({ error: 'Reseed failed' }); }
 });
@@ -1816,7 +1834,7 @@ async function start() {
         const lan = Object.values(nets).flat().find(i => i.family==='IPv4' && !i.internal);
         console.log(`
 ╔════════════════════════════════════════════════════════╗
-║   Social Coding LMS v2 — offline-first · Group 29      ║
+║   Social Coding LMS v2 · Group 29                      ║
 ║   Local:   http://localhost:${PORT}                        ║
 ║   Mobile:  http://${(lan?.address||'your-ip').padEnd(15)}:${PORT}              ║
 ╠════════════════════════════════════════════════════════╣

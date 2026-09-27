@@ -1,13 +1,15 @@
 {
   "name": "social-coding-lms",
   "version": "1.0.0",
-  "description": "Offline-first LMS for Social Coding SA (Group 29)",
+  "description": "Learning management system for Social Coding SA (Group 29)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "mobile:sync": "npx cap sync android",
     "mobile:open": "npx cap open android",
-    "mobile:icons": "npx @capacitor/assets generate --android --iconBackgroundColor '#0D0D0D' --splashBackgroundColor '#0D0D0D'"
+    "mobile:icons": "npx @capacitor/assets generate --android --iconBackgroundColor '#0D0D0D' --splashBackgroundColor '#0D0D0D'",
+    "demo": "node server.js",
+    "fresh": "node -e \"require('fs').existsSync('social_coding.db')&&require('fs').unlinkSync('social_coding.db');console.log('database cleared \u2014 next start reseeds')\""
   },
   "keywords": [],
   "author": "",
